@@ -4,7 +4,7 @@ A complete port of Geometry Dash to a web browser
 
 Single file only, source not included
 
-Credit to the [gn-math](https://gn-math.dev) team for getting the base port working
+Credit to [bog](https://jew.bio/) for getting the base port working
 
 Changes made from the gn-math version:
 - No config in-game internet support (kn0tzer.work.gd/wss)
