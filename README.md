@@ -1,6 +1,4 @@
-# gd.html
-## [Play](https://kn0tzer.work.gd/gd)
-## [Download](https://github.com/Kn0tzer/gd.html/releases/download/1.0/gd.html)
+# gd.html | [Play](https://kn0tzer.work.gd/gd) | [Download](https://github.com/Kn0tzer/gd.html/releases/download/1.0/gd.html)
 
 A complete port of Geometry Dash to a web browser
 
