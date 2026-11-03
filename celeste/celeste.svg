@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="background:#141414">
+<text id="message" x="50%" y="50%" fill="#ededed" font-family="sans-serif" font-size="18" text-anchor="middle">Loading Celeste...</text>
+<script><![CDATA[
+(async()=>{
+ const message=document.getElementById('message');
+ try {
+  if (!('serviceWorker' in navigator)) throw Error('Service workers are unavailable in this browser.');
+  navigator.serviceWorker.addEventListener('message',event=>{const p=event.data;if(p?.type==='game-loading')message.textContent='Downloading '+p.file+': '+Math.round(p.loaded/Math.max(1,p.total)*100)+'%';});
+  const registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+  const worker=registration.installing||registration.waiting;
+  if(worker && worker.state!=='activated')await new Promise((resolve,reject)=>{worker.addEventListener('statechange',()=>{if(worker.state==='activated')resolve();else if(worker.state==='redundant')reject(Error('The loader worker could not activate.'));});});
+  await navigator.serviceWorker.ready;
+  const key='game-delivery-8279143dfcbc1c6f-celeste', previous=JSON.parse(sessionStorage.getItem(key)||'[0,0]');
+  const count=Date.now()-previous[1]<60000?previous[0]:0;
+  if(count>=3)throw Error('The game could not start. Reload to retry.');
+  sessionStorage.setItem(key,JSON.stringify([count+1,Date.now()]));
+  location.reload();
+ } catch(error) { message.textContent=error.message; }
+})();
+]]></script></svg>

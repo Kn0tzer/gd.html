@@ -1,0 +1,92 @@
+// The 26.3 build's new Java relay manager ignores eaglercraftXOpts.relays.
+// Route its built-in Java relay endpoint to this deployment's fixed backend.
+// Other WebSocket uses retain the native constructor and behavior.
+(() => {
+  // browser-account.js shows the username banner only in Eagler.
+  window.season2EaglerHints = true;
+  // The Java relay manager reads its own saved list, independently of XOpts.relays.
+  // Add the local relay at runtime while preserving the user's other saved relays.
+  window.season2RelaySettings = key => {
+    if (!key.endsWith('.relay.list.v3')) return null;
+    let saved = [];
+    try { const value = JSON.parse(atob(localStorage.getItem(key) || '')); if (Array.isArray(value)) saved = value; } catch {}
+    const own = {name:'Season 2',address:'wss://craft.run.place/wss/minecraft',capability:'multiplayer',detected:'multiplayer',private:false};
+    const profiles = [own, ...saved.filter(p => p.address !== own.address)];
+    const bytes = new TextEncoder().encode(JSON.stringify(profiles));
+    return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
+  };
+  // The multiplayer list ignores eaglercraftXOpts.servers and reads servers.dat from the worlds
+  // IndexedDB filesystem, falling back to a built-in ArchMC entry. Put Season 2 at the top on each load.
+  window.season2ServerEntry = {name: 'Season 2', ip: 'craft.run.place:25565'};
+  window.season2AddServer = bytes => {
+    const {name, ip} = window.season2ServerEntry, encoder = new TextEncoder();
+    const string = (tag, key, value) => {
+      const k = encoder.encode(key), v = value === undefined ? null : encoder.encode(value);
+      const out = [tag, k.length >> 8, k.length & 255, ...k];
+      if (v) out.push(v.length >> 8, v.length & 255, ...v);
+      return out;
+    };
+    const entry = [...string(8, 'ip', ip), ...string(8, 'name', name), 0];
+    if (!bytes) return new Uint8Array([...string(10, ''), ...string(9, 'servers'), 10, 0, 0, 0, 1, ...entry, 0]);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), decoder = new TextDecoder();
+    let at = 0;
+    const text = () => { const n = view.getUint16(at); at += 2 + n; return decoder.decode(bytes.subarray(at - n, at)); };
+    const sizes = {1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8};
+    function skip(type) {
+      if (sizes[type]) at += sizes[type];
+      else if (type === 7 || type === 11 || type === 12) { const n = view.getInt32(at); at += 4 + n * {7: 1, 11: 4, 12: 8}[type]; }
+      else if (type === 8) text();
+      else if (type === 9) { const inner = view.getUint8(at++), n = view.getInt32(at); at += 4; for (let i = 0; i < n; i++) skip(inner); }
+      else if (type === 10) { for (let tag; (tag = view.getUint8(at++)) !== 0;) { text(); skip(tag); } }
+      else throw new Error('Unknown NBT tag ' + type);
+    }
+    if (view.getUint8(at++) !== 10) return null;
+    text();
+    for (let tag; (tag = view.getUint8(at++)) !== 0;) {
+      const key = text();
+      if (tag !== 9 || key !== 'servers') { skip(tag); continue; }
+      const inner = view.getUint8(at), countAt = at + 1, count = view.getInt32(countAt);
+      if (count && inner !== 10) return null;
+      at = countAt + 4;
+      for (let i = 0; i < count; i++) {
+        for (let child; (child = view.getUint8(at++)) !== 0;) {
+          const childKey = text();
+          if (child === 8 && childKey === 'ip') { if (text().toLowerCase() === ip) return null; } else skip(child);
+        }
+      }
+      const out = new Uint8Array(bytes.length + entry.length);
+      out.set(bytes.subarray(0, countAt + 4)); out.set(entry, countAt + 4); out.set(bytes.subarray(countAt + 4), countAt + 4 + entry.length);
+      out[countAt - 1] = 10; new DataView(out.buffer).setInt32(countAt, count + 1);
+      return out;
+    }
+    return null;
+  };
+  try {
+    const request = indexedDB.open('_net_lax1dude_eaglercraft_v1_8_internal_PlatformFilesystem_1_8_8_worlds', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('filesystem', {keyPath: ['path']});
+    request.onsuccess = () => {
+      const db = request.result, store = db.transaction('filesystem', 'readwrite').objectStore('filesystem');
+      const read = store.get(['servers.dat']);
+      read.onsuccess = () => {
+        const data = read.result?.data;
+        const updated = window.season2AddServer(data ? new Uint8Array(data) : null);
+        if (updated) store.put({path: 'servers.dat', data: updated.buffer});
+      };
+      store.transaction.oncomplete = () => db.close();
+    };
+  } catch (_) {}
+  const NativeWebSocket = window.WebSocket;
+  window.WebSocket = new Proxy(NativeWebSocket, {
+    construct(Target, args, newTarget) {
+      let url;
+      try { url = new URL(String(args[0])); } catch (_) {}
+      if (url?.hostname === 'relay.eaglercraft.net' && url.pathname === '/minecraft') {
+        url.protocol = 'wss:';
+        url.host = 'craft.run.place';
+        url.pathname = '/wss/minecraft';
+        args[0] = url.href;
+      }
+      return Reflect.construct(Target, args, newTarget);
+    }
+  });
+})();

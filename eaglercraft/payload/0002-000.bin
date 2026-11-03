@@ -1,0 +1,124 @@
+/* Shared password prompt for both browser clients. Credentials stay in this live socket only. */
+(() => {
+  const NativeWebSocket = window.WebSocket;
+  let dialog, form, nameHint, activeSocket, currentState, pending = false, connected = false;
+  function setup() {
+    if (dialog) return;
+    const style = document.createElement('style');
+    style.textContent = `
+      #browser-account { color-scheme:dark; color:#e8e8e8; background:#1e1e1e; border:1px solid #444;
+        border-radius:8px; padding:20px; box-sizing:border-box; width:min(380px,calc(100% - 24px));
+        font:15px/1.45 system-ui,sans-serif; box-shadow:0 12px 40px rgb(0 0 0 / 50%); }
+      #browser-account::backdrop { background:rgb(0 0 0 / 60%); }
+      #browser-account p { margin:0 0 14px; }
+      #browser-account input { box-sizing:border-box; width:100%; height:42px; padding:0 12px; border:1px solid #555;
+        border-radius:6px; background:#111; color:#fff; font:inherit; }
+      #browser-account button { width:100%; height:42px; margin-top:10px; border:0; border-radius:6px;
+        background:#3c8527; color:#fff; font:600 15px system-ui,sans-serif; cursor:pointer; }
+      #browser-account button:disabled { opacity:.6; cursor:default; }
+      #browser-account :focus-visible { outline:2px solid #8fd16f; outline-offset:2px; }
+      #browser-account #account-message { color:#ff9f8a; margin:10px 0 0; }
+      #browser-account #account-message:empty { display:none; }
+      #browser-account #account-help-toggle { width:auto; height:auto; margin:0 0 14px; padding:6px 14px;
+        background:transparent; border:1px solid #666; color:#e8e8e8; font:600 14px system-ui,sans-serif; }
+      #browser-account #account-help { color:#c8c8c8; font-size:14px; }
+      #browser-account #account-help[hidden] { display:none; }
+      #browser-name-hint { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:2147483647;
+        background:#b3261e; color:#fff; padding:10px 18px; border-radius:6px; font:600 16px system-ui,sans-serif;
+        box-shadow:0 4px 16px rgb(0 0 0 / 50%); pointer-events:none; text-align:center; width:max-content; max-width:calc(100% - 24px); box-sizing:border-box; }
+    `;
+    document.head.append(style);
+    dialog = document.createElement('dialog'); dialog.id = 'browser-account';
+    dialog.setAttribute('aria-label', 'Server password');
+    // Static trusted markup only. Server-supplied messages use textContent below.
+    dialog.innerHTML = `<form id="browser-account-form">
+      <p id="account-intro">Type your password to login or create an account.</p>
+      <button type="button" id="account-help-toggle" aria-expanded="false" aria-controls="account-help">Help</button>
+      <div id="account-help" hidden>
+        <p>In real Minecraft (not the browser version) type "/register &lt;password&gt; &lt;confirm password&gt;" to create an account, then in browser Minecraft set your username to your real Minecraft username and type the password you created here. There is no password reset option, so write it down.</p>
+        <p>If you don't have real Minecraft, type in a password here to create an account. There is no password reset option, so write it down.</p>
+      </div>
+      <input id="account-password" name="password" type="password" autocomplete="current-password" maxlength="128" required placeholder="Password" aria-label="Password">
+      <p id="account-message" role="status" aria-live="polite"></p>
+      <button type="submit" id="account-submit">Play</button>
+    </form>`;
+    document.body.append(dialog); form = dialog.querySelector('form');
+    const password = form.elements.password;
+    const helpToggle = document.getElementById('account-help-toggle');
+    helpToggle.addEventListener('click', () => {
+      const help = document.getElementById('account-help');
+      help.hidden = !help.hidden; helpToggle.setAttribute('aria-expanded', String(!help.hidden));
+    });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (pending || !activeSocket || activeSocket.readyState !== NativeWebSocket.OPEN) return;
+      pending = true; document.getElementById('account-submit').disabled = true;
+      document.getElementById('account-message').textContent = '';
+      // A new name registers with this one password; an existing name logs in with it.
+      NativeWebSocket.prototype.send.call(activeSocket, JSON.stringify({type:'browser-auth', action:currentState,
+        password:password.value, ...(currentState === 'register' ? {confirmation:password.value} : {})}));
+      // Do not retain credentials while waiting on the server or after switching screens.
+      password.value = '';
+    });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); activeSocket?.close(1000,'Disconnected'); dismiss(); });
+    for (const name of ['keydown','keyup','keypress','mousedown','mouseup','pointerdown','pointerup']) {
+      window.addEventListener(name, event => { if (dialog.open) event.stopImmediatePropagation(); }, true);
+    }
+    const requestPointerLock = Element.prototype.requestPointerLock;
+    if (requestPointerLock) Element.prototype.requestPointerLock = function(...args) {
+      if (dialog.open) return Promise.resolve();
+      return requestPointerLock.apply(this,args);
+    };
+  }
+  function dismiss() {
+    if (!dialog) return;
+    form.reset(); pending = false; dialog.close(); activeSocket = null;
+    document.getElementById('account-help').hidden = true;
+    document.getElementById('account-help-toggle').setAttribute('aria-expanded', 'false');
+  }
+  // Eagler only (window.season2EaglerHints). Its profile screen follows the loading screen; browser
+  // names must match the real Minecraft name to share a linked account.
+  function showNameHint() {
+    if (!window.season2EaglerHints || connected) return;
+    const loading = document.getElementById('loading_screen');
+    if (loading && !loading.classList.contains('is-ready')) { setTimeout(showNameHint, 500); return; }
+    if (!dialog) setup();
+    nameHint = document.createElement('div'); nameHint.id = 'browser-name-hint';
+    nameHint.textContent = 'Type in your real Minecraft username';
+    document.body.append(nameHint);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showNameHint);
+  else showNameHint();
+  function update(socket, message) {
+    if (!dialog) setup();
+    if (message.state === 'authenticated') { if (activeSocket === socket) dismiss(); return; }
+    if (!['login','register'].includes(message.state) && activeSocket !== socket) return;
+    if (['login','register'].includes(message.state)) {
+      // Never move a typed password to another connection, including a reconnect under another name.
+      if (activeSocket && activeSocket !== socket) dismiss();
+      activeSocket = socket; currentState = message.state;
+      if (!dialog.open) { document.exitPointerLock?.(); dialog.showModal(); form.elements.password.focus(); }
+    }
+    pending = false; document.getElementById('account-submit').disabled = false;
+    document.getElementById('account-message').textContent = message.message || '';
+  }
+  window.WebSocket = new Proxy(NativeWebSocket, {
+    construct(Target, args, newTarget) {
+      const socket = Reflect.construct(Target, args, newTarget);
+      let url; try { url = new URL(String(args[0])); } catch {}
+      if (url && ['craft.run.place','kn0tzer.work.gd'].includes(url.hostname)
+          && ['/wss','/wss/minecraft'].includes(url.pathname)) {
+        connected = true; nameHint?.remove();
+        // Install before the game's listeners. Control messages never enter its binary protocol stream.
+        socket.addEventListener('message', event => {
+          if (typeof event.data !== 'string') return;
+          let message; try { message = JSON.parse(event.data); } catch { return; }
+          if (message?.type !== 'browser-auth') return;
+          event.stopImmediatePropagation(); update(socket,message);
+        });
+        socket.addEventListener('close', () => { if (activeSocket === socket) dismiss(); });
+      }
+      return socket;
+    }
+  });
+})();
