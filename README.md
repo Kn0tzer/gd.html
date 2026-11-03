@@ -6,6 +6,8 @@ Single file only, source not included
 
 Credit to [bog](https://jew.bio/) for getting the base port working
 
+Ignore Celeste and Eaglercraft in the source, it's for hosting files over jsdelivr
+
 Changes made from the gn-math version:
 - No config in-game internet support (kn0tzer.work.gd/wss)
 - Fixed account syncing
@@ -17,4 +19,6 @@ Changes made from the gn-math version:
 - Fixed display stretching by locking aspect ratio to 16:9
 
 ## Takedown Requests
-Email me at kn3tzer@gmail.com. I'll respond within 2 days, probably less.
+Email me at kn3tzer@gmail.com for Geometry Dash related takedowns or requests. I'll respond within 3 days, probably under 1 day.
+
+Absolutely no Celeste or Minecraft/Eaglercraft code is hosted here. The source related to them is infrastructure only, with no game files available anywhere.
